@@ -4,8 +4,8 @@ import sys
 import time
 import json
 
-from lifxlan import LifxLAN
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from lifxlan import LifxLAN
 
 HOST_NAME = 'localhost'
 PORT_NUMBER = 6969
@@ -14,8 +14,8 @@ class Server:
     def __init__(self):
         self.server = HTTPServer((HOST_NAME, PORT_NUMBER), ReqHandler)
 
-        self.server.get_path = '/lifx/status'
-        self.server.post_path = '/lifx'
+        self.server.get_path = '/lifx/status/'
+        self.server.post_path = '/lifx/'
 
         print(time.asctime(), 'Server Starts - %s:%s' % (HOST_NAME, PORT_NUMBER))
         num_lights = None
@@ -57,13 +57,12 @@ class Server:
 class ReqHandler(BaseHTTPRequestHandler):
 
     def do_HEAD(self):
-        self.send_response(200)
-        self.send_header('Content-type', 'application/json')
-        self.end_headers()
+        self.respond(200)
 
     def do_GET(self):
         if self.path == self.server.get_path:
-            self.respond(200, json.dumps({'status': "OK"}))
+            json_response = self.get_light_details()
+            self.respond(200, json.dumps(json_response))
         else:
             self.respond(404)
 
@@ -73,19 +72,15 @@ class ReqHandler(BaseHTTPRequestHandler):
             return
         # refuse to receive non-json content
         payload_type = self.headers['content-type']
-        if payload_type != 'application/json':
+        if payload_type != 'application/json' and payload_type != 'application/json; charset=utf-8':
             self.respond(400)
             return
 
         # Get Dictionary of Post payload
         length = int(self.headers['content-length'])
-        raw_payload = self.rfile.read(length)
-        try:
-            payload = json.loads(raw_payload)
-            json_response = self.handle_light_command(payload)
-        except Exception as e:
-            self.respond(400)
-        self.respond(200, json_response)
+        payload = json.loads(self.rfile.read(length))
+        json_response = self.handle_light_command(payload)
+        self.respond(200, json.dumps(json_response))
 
     def respond(self, status_code, json_response=None):
         self.send_response(status_code)
@@ -137,13 +132,38 @@ class ReqHandler(BaseHTTPRequestHandler):
                     self.cap_brightness(color[2] - 10000),
                     color[3]
                 ))
+            elif command.lower() == 'bmax' or command.lower() == 'max':
+                color = light.get_color()
+                light.set_color((
+                    color[0],
+                    color[1],
+                    65535,
+                    color[3]
+                ))
 
-        return json.dumps({"msg": command_text})
+        # wait for light status to be updated after receiving command
+        # very bad solution, might be unpredictable if devices are slower than 0.25s to update
+        # can't think of a better way to solve this right now
+        time.sleep(0.25)
+
+        # return {"msg": command_text, "status": self.get_light_details()}
+        return self.get_light_details()
+
 
     def get_light(self, label):
         for device in self.server.devices:
             if device.label.lower() == label.lower():
                 return device
+
+    def get_light_details(self):
+        json_response = {'results': []}
+        for device in self.server.devices:
+            json_response['results'].append({
+                'label': device.get_label(),
+                'power': "on" if device.get_power() > 0 else "off",
+                'brightness': device.get_color()[2],
+            })
+        return json_response
 
     def cap_brightness(self, b):
         if b >= 65535:
