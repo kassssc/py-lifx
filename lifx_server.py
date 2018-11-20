@@ -79,8 +79,12 @@ class ReqHandler(BaseHTTPRequestHandler):
         # Get Dictionary of Post payload
         length = int(self.headers['content-length'])
         payload = json.loads(self.rfile.read(length))
-        json_response = self.handle_light_command(payload)
-        self.respond(200, json.dumps(json_response))
+        try:
+            json_response = self.handle_light_command(payload)
+            self.respond(200, json.dumps(json_response))
+        except Exception as ex:
+            print(ex)
+            self.respond(400)
 
     def respond(self, status_code, json_response=None):
         self.send_response(status_code)
@@ -104,6 +108,10 @@ class ReqHandler(BaseHTTPRequestHandler):
         else:
             light_label = payload['light_label']
             light = self.get_light(light_label)
+
+            if light is None:
+                raise Exception("Light label provided does not exist")
+
             command_text = "{} command to {} received".format(command, light_label)
 
             if command.lower() == 'on':
